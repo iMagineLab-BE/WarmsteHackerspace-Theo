@@ -14,6 +14,8 @@ static uint8_t button1_state = 0;
 static uint8_t button2_state = 0;
 static uint8_t button3_state = 0;
 
+static uint8_t button0_pressed = 0;
+
 hw_timer_t * timer = NULL;
 
 void button_pressed(){
@@ -36,10 +38,7 @@ void setup() {
   pinMode(LED, OUTPUT);
 
   
-  attachInterrupt(digitalPinToInterrupt(BUTTON0), button_pressed, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BUTTON1), button_pressed, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BUTTON2), button_pressed, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BUTTON3), button_pressed, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON0), button_pressed, RISING);
   // attach interrupts => wake from sleep to run mainloop
   // OR run timer, that triggers main loop execution periodically?
 
@@ -62,16 +61,10 @@ void loop() {
     run_loop = 0;
 
     // get intputs
-    if(button_state_changed){
+    if(button_state_changed && !digitalRead(BUTTON0)){
       button_state_changed = 0;
-      button0_state = digitalRead(BUTTON0);
-      button1_state = digitalRead(BUTTON1);
-      button2_state = digitalRead(BUTTON2);
-      button3_state = digitalRead(BUTTON3);
-
-
-      digitalWrite(LED, !led_state);
-      led_state = !led_state;
+      led_state  = !led_state;
+      digitalWrite(LED, led_state);
     }
   }
 }
