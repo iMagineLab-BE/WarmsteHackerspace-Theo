@@ -1,10 +1,20 @@
 #include "EspMQTTClient.h"
 
-#define BUTTON0 13
-#define BUTTON1 12
-#define BUTTON2 14
-#define BUTTON3 27
-#define LED 2
+#define BUTTON0_0 13
+#define BUTTON0_1 12
+#define BUTTON0_2 14
+#define BUTTON0_3 27
+
+#define BUTTON1_0 26
+#define BUTTON1_1 25
+#define BUTTON1_2 33
+#define BUTTON1_3 32
+
+#define TOGGLESW 35
+#define LED1 34
+#define LED2 39
+
+#define LED_ONBOARD 2
 
 // Init mqtt
 EspMQTTClient client(
@@ -20,15 +30,26 @@ EspMQTTClient client(
 // Init buttons
 static volatile uint8_t run_loop = 0;
 static volatile uint8_t button_state_changed = 0;
-static uint8_t led_state = 0;
-static uint8_t button0_state = 0;
-static uint8_t button1_state = 0;
-static uint8_t button2_state = 0;
-static uint8_t button3_state = 0;
 hw_timer_t * timer = NULL;
+static uint8_t led_state = 0;
+
+struct{
+  uint8_t button0_pressed : 1;
+  uint8_t button1_pressed : 1;
+  uint8_t button2_pressed : 1;
+  uint8_t button3_pressed : 1;
+} buttons;
+
+struct{
+  uint8_t mode_switch : 1;
+} switches;
 
 void button_pressed() {
     button_state_changed = 1;
+}
+
+void toggle_switch_toggled(){
+  switches.mode_switch = digitalRead(TOGGLESW);
 }
 
 void IRAM_ATTR timerCallback() {
@@ -39,17 +60,34 @@ void setup() {
     Serial.begin(115200);
 
     // inputs
-    pinMode(BUTTON0, INPUT_PULLUP);
-    pinMode(BUTTON1, INPUT_PULLUP);
-    pinMode(BUTTON2, INPUT_PULLUP);
-    pinMode(BUTTON3, INPUT_PULLUP);
+    pinMode(BUTTON0_0, INPUT_PULLUP);
+    pinMode(BUTTON0_1, INPUT_PULLUP);
+    pinMode(BUTTON0_2, INPUT_PULLUP);
+    pinMode(BUTTON0_3, INPUT_PULLUP);
 
-    pinMode(LED, OUTPUT);
+    pinMode(BUTTON1_0, INPUT_PULLUP);
+    pinMode(BUTTON1_1, INPUT_PULLUP);
+    pinMode(BUTTON1_2, INPUT_PULLUP);
+    pinMode(BUTTON1_3, INPUT_PULLUP);
 
-    attachInterrupt(digitalPinToInterrupt(BUTTON0), button_pressed, FALLING);
-    attachInterrupt(digitalPinToInterrupt(BUTTON1), button_pressed, FALLING);
-    attachInterrupt(digitalPinToInterrupt(BUTTON2), button_pressed, FALLING);
-    attachInterrupt(digitalPinToInterrupt(BUTTON3), button_pressed, FALLING);
+    pinMode(TOGGLESW, INPUT_PULLUP);
+
+    pinMode(LED_ONBOARD, OUTPUT);
+    pinMode(LED1, OUTPUT);
+    pinMode(LED2, OUTPUT);
+
+    // FALLING and RISING also work as CHANGE...
+    attachInterrupt(digitalPinToInterrupt(BUTTON0_0), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON0_1), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON0_2), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON0_3), button_pressed, CHANGE);
+
+    attachInterrupt(digitalPinToInterrupt(BUTTON1_0), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON1_1), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON1_2), button_pressed, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUTTON1_3), button_pressed, CHANGE);
+
+    attachInterrupt(digitalPinToInterrupt(TOGGLESW), button_pressed, CHANGE);
     // attach interrupts => wake from sleep to run mainloop
     // OR run timer, that triggers main loop execution periodically?
 
@@ -61,7 +99,7 @@ void setup() {
     timerAttachInterrupt(timer, &timerCallback, true);
     timerAlarmWrite(timer, 1000, true);
     timerAlarmEnable(timer);
-    digitalWrite(LED, led_state);
+    digitalWrite(LED_ONBOARD, led_state);
 }
 
 void onConnectionEstablished() {}
@@ -72,21 +110,53 @@ void loop() {
     if(run_loop) {
         run_loop = 0;
 
-        // get intputs
+        // button input handling when inputs
         if(button_state_changed) {
-            button_state_changed = 0;
-            button0_state = digitalRead(BUTTON0);
-            button1_state = digitalRead(BUTTON1);
-            button2_state = digitalRead(BUTTON2);
-            button3_state = digitalRead(BUTTON3);
-            
-            digitalWrite(LED, !led_state);
-            led_state = !led_state;
+          if(!digitalRead(BUTTON0_0) || !digitalRead(BUTTON0_1) ||!digitalRead(BUTTON0_2) || !digitalRead(BUTTON0_3)){
+            buttons.button0_pressed = 1;
 
-            if(client.isMqttConnected()) {
-                client.publish("warmste/week/theo", "Hi!");
-                Serial.print("Message sent.\n");
+            digitalWrite(LED_ONBOARD, !led_state);
+            led_state = !led_state;
+          }
+          if(!digitalRead(BUTTON1_0) || !digitalRead(BUTTON1_1) ||!digitalRead(BUTTON1_2) || !digitalRead(BUTTON1_3)){
+            buttons.button1_pressed = 1;
+            
+            digitalWrite(LED_ONBOARD, !led_state);
+            led_state = !led_state;
+          }
+        }
+
+        // main statemachine would go here.
+
+        // first state, send mqtt
+        if(switches.mode_switch == 1){
+          if(client.isMqttConnected()) {
+            if(buttons.button0_pressed = 1){
+              buttons.button0_pressed = 0;
+              client.publish("warmste/week/theo/buttons/0", "1");
+              Serial.print("Message sent.\n");
+            }
+            if(buttons.button1_pressed = 1){
+              buttons.button1_pressed = 0;
+              client.publish("warmste/week/theo/buttons/1", "1");
+              Serial.print("Message sent.\n");
             }
         }
+        else{
+          // do the same for now.
+                    if(client.isMqttConnected()) {
+            if(buttons.button0_pressed = 1){
+              buttons.button0_pressed = 0;
+              client.publish("warmste/week/theo/buttons/0", "1");
+              Serial.print("Message sent.\n");
+            }
+            if(buttons.button1_pressed = 1){
+              buttons.button1_pressed = 0;
+              client.publish("warmste/week/theo/buttons/1", "1");
+              Serial.print("Message sent.\n");
+            }
+        }
+        }
     }
+}
 }
