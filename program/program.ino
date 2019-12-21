@@ -1,4 +1,10 @@
 #include "EspMQTTClient.h"
+#include "Arduino.h"
+#include "DFRobotDFPlayerMini.h"
+
+// DFPlayer Mini (MP3 player)
+HardwareSerial mySoftwareSerial(1);
+DFRobotDFPlayerMini myDFPlayer;
 
 #define BUTTON0_0 13
 #define BUTTON0_1 12
@@ -20,7 +26,7 @@
 EspMQTTClient client(
 	"theo",
 	"plopkoeken",
-	"172.16.0.137", // MQTT Broker server ip
+	"192.168.1.254", // MQTT Broker server ip
 	"theo",			// Can be omitted if not needed
 	"plopkoeken",   // Can be omitted if not needed
 	"ESP32",		// Client name that uniquely identify your device
@@ -33,7 +39,7 @@ static volatile uint8_t button_state_changed = 0;
 hw_timer_t *timer = NULL;
 static uint8_t led_state = 0;
 char buff[3];
-
+bool prev_sw_state = 0;
 struct
 {
 	uint8_t button0_pressed : 1;
@@ -97,7 +103,7 @@ void setup()
 	attachInterrupt(digitalPinToInterrupt(BUTTON1_2), button_pressed, CHANGE);
 	attachInterrupt(digitalPinToInterrupt(BUTTON1_3), button_pressed, CHANGE);
 
-	attachInterrupt(digitalPinToInterrupt(TOGGLESW), toggle_switch_toggled, CHANGE);
+	//attachInterrupt(digitalPinToInterrupt(TOGGLESW), toggle_switch_toggled, CHANGE);
 	// attach interrupts => wake from sleep to run mainloop
 	// OR run timer, that triggers main loop execution periodically?
 
@@ -110,9 +116,19 @@ void setup()
 	timerAlarmWrite(timer, 1000, true);
 	timerAlarmEnable(timer);
 	digitalWrite(LED_ONBOARD, led_state);
+  prev_sw_state = digitalRead(TOGGLESW);
+  switches.mode_switch = prev_sw_state;
+
+  //DFPlayer Mini
+  mySoftwareSerial.begin(9600, SERIAL_8N1, 16, 17);
+  myDFPlayer.begin(mySoftwareSerial);
+  myDFPlayer.volume(30);
+  myDFPlayer.play(1);
 }
 
 void onConnectionEstablished() {
+    sprintf(buff, "%d%d%d", 0, 0, switches.mode_switch);
+    client.publish("warmste/week/theo", buff);
     Serial.print("MQTT connected.\n");
 }
 
@@ -143,11 +159,18 @@ void loop()
 		}
 
 		// main statemachine would go here.
-
+    bool sw_state = digitalRead(TOGGLESW);
+    if(sw_state != prev_sw_state) {
+        switches.mode_switch = sw_state;
+        sprintf(buff, "%d%d%d", 0, 0, switches.mode_switch);
+        client.publish("warmste/week/theo", buff);
+        Serial.print("State switch.\n");
+    }
+    prev_sw_state = sw_state;
 		// first state, send mqtt
-		if (switches.mode_switch == 1)
+		if (sw_state)
 		{
-			if (client.isMqttConnected())
+			if (true)//(client.isMqttConnected())
 			{
 				if (buttons.button0_pressed == 1)
 				{
@@ -156,6 +179,10 @@ void loop()
           sprintf(buff, "%d%d%d", 1, 0, switches.mode_switch);
           client.publish("warmste/week/theo", buff);
 					Serial.print("Message sent.\n");
+          // Play "yes"
+          if (myDFPlayer.available()) {
+              myDFPlayer.play(1);   
+          }
 				}
 				if (buttons.button1_pressed == 1)
 				{
@@ -164,10 +191,13 @@ void loop()
           sprintf(buff, "%d%d%d", 0, 1, switches.mode_switch);
           client.publish("warmste/week/theo", buff);
 					Serial.print("Message sent.\n");
+          // Play "no"
+          if (myDFPlayer.available()) {
+              myDFPlayer.play(2);   
+          }
 				}
 			}
 		} else {
-			// do the same for now.
 			if (client.isMqttConnected())
 			{
 				if (buttons.button0_pressed == 1)
