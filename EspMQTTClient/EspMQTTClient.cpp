@@ -402,6 +402,10 @@ void EspMQTTClient::connectToWifi()
   #else
     WiFi.hostname(mMqttClientName);
   #endif
+  IPAddress ip(192, 168, 1, 5); 
+  IPAddress gateway(192, 168, 1, 254);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.config(ip, gateway, subnet);
   WiFi.begin(mWifiSsid, mWifiPassword);
 
   if (mEnableSerialLogs)
