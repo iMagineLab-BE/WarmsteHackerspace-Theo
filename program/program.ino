@@ -28,7 +28,7 @@ DFRobotDFPlayerMini myDFPlayer;
 EspMQTTClient client(
 	"theo",
 	"plopkoeken",
-	"192.168.1.254", // MQTT Broker server ip
+	"192.168.0.254", // MQTT Broker server ip
 	"theo",			// Can be omitted if not needed
 	"plopkoeken",   // Can be omitted if not needed
 	"ESP32",		// Client name that uniquely identify your device
