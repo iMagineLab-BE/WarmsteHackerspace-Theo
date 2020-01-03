@@ -2,260 +2,342 @@
 #include "Arduino.h"
 #include "DFRobotDFPlayerMini.h"
 
-// DFPlayer Mini (MP3 player)
+/* Turn on debug mode - turn off to lower power consumption */
+#define DEBUG
+
+/* DFPlayer Mini (MP3 player) */
 HardwareSerial mySoftwareSerial(1);
 DFRobotDFPlayerMini myDFPlayer;
+#define BUSY_PIN 18     // DFPlayer busy pin input
 
+/* Button 0 input */
 #define BUTTON0_0 13
 #define BUTTON0_1 12
 #define BUTTON0_2 14
 #define BUTTON0_3 27
 
+/* Button 1 input */
 #define BUTTON1_0 26
 #define BUTTON1_1 25
 #define BUTTON1_2 33
 #define BUTTON1_3 32
 
+/* Mode selection switch input */
 #define TOGGLESW 5
+
+/* On-board LEDs */
 #define LED1 34
 #define LED2 39
-
-#define BUSY_PIN 18
-
 #define LED_ONBOARD 2
 
-// Init mqtt
-EspMQTTClient client(
-	"theo",
-	"plopkoeken",
-	"192.168.13.254", // MQTT Broker server ip
-	"theo",			// Can be omitted if not needed
-	"plopkoeken",   // Can be omitted if not needed
-	"ESP32",		// Client name that uniquely identify your device
-	1883			// MQTT Port: default = 1883
+/* MQTT client configuration */
+EspMQTTClient mqtt_client(
+  "theo",             // Wi-Fi SSID
+  "plopkoeken",       // Wi-Fi Password
+  "192.168.13.254",   // MQTT Broker server ip
+  "theo",             // MQTT Username - Can be omitted if not needed
+  "plopkoeken",       // MQTT Password Can be omitted if not needed
+  "THEO-CONTROLLER",  // Client name that uniquely identify your device
+  1883                // MQTT Port: default = 1883
 );
 
-// Init buttons
-static volatile uint8_t run_loop = 0;
-static volatile uint8_t button_state_changed = 0;
-hw_timer_t *timer = NULL;
+/* Variables declaration */
+static volatile uint8_t button_0_state_changed = 0;
+static volatile uint8_t button_1_state_changed = 0;
 static uint8_t led_state = 0;
-char buff[3];
-bool prev_sw_state = 0;
+char send_buff[3];
 struct
 {
-	uint8_t button0_state : 1;
+  uint8_t button0_state : 1;
   uint8_t button0_initial_press : 1;
-	uint8_t button1_state : 1;
+  uint8_t button1_state : 1;
   uint8_t button1_initial_press : 1;
-	uint8_t button2_state : 1;
+  uint8_t button2_state : 1;
   uint8_t button2_initial_press : 1;
-	uint8_t button3_state : 1;
+  uint8_t button3_state : 1;
   uint8_t button3_initial_press : 1;
 } buttons;
 
 struct
 {
-	uint8_t mode_switch : 1;
+  uint8_t mode_switch : 1;
 } switches;
 
-void button_pressed()
+/* Interrupt callback - Button 0 */
+void button_0_pressed()
 {
-	button_state_changed = 1;
-	//run_loop = 1;
+  button_0_state_changed = 1;
 }
 
-void toggle_switch_toggled()
+/* Interrupt callback - Button 1 */
+void button_1_pressed()
 {
-	switches.mode_switch = digitalRead(TOGGLESW);
-  sprintf(buff, "%d%d%d", 0, 0, switches.mode_switch);
-  client.publish("warmste/week/theo", buff);
-	Serial.print("State switch.\n");
+  button_1_state_changed = 1;
 }
 
-// void IRAM_ATTR timerCallback()
-// {
-// 	run_loop = 1;
-// }
+/* Interrupt callback - Switch */
+void switch_toggled()
+{
+  switches.mode_switch = digitalRead(TOGGLESW);
+  sprintf(send_buff, "%d%d%d", 0, 0, switches.mode_switch);
+  mqtt_client.publish("warmste/week/theo", send_buff);
+	
+  #ifdef DEBUG
+  Serial.print("State switch.\n");
+  #endif
+}
+
+void setLedState(uint8_t led, uint8_t state)
+{
+  digitalWrite(led, state);
+}
+
+void toggleLedState(uint8_t led, uint8_t* state)
+{
+  *state = !*state;
+  digitalWrite(led, *state);
+}
 
 void setup()
 {
-	Serial.begin(115200);
+  /* Initialise serial debug communication */
+  #ifdef DEBUG
+  Serial.begin(115200);
+  #endif
 
-	// inputs
-	pinMode(BUTTON0_0, INPUT_PULLUP);
-	pinMode(BUTTON0_1, INPUT_PULLUP);
-	pinMode(BUTTON0_2, INPUT_PULLUP);
-	pinMode(BUTTON0_3, INPUT_PULLUP);
+  /* Initialise inputs */
+  pinMode(BUTTON0_0, INPUT_PULLUP);
+  pinMode(BUTTON0_1, INPUT_PULLUP);
+  pinMode(BUTTON0_2, INPUT_PULLUP);
+  pinMode(BUTTON0_3, INPUT_PULLUP);
 
-	pinMode(BUTTON1_0, INPUT_PULLUP);
-	pinMode(BUTTON1_1, INPUT_PULLUP);
-	pinMode(BUTTON1_2, INPUT_PULLUP);
-	pinMode(BUTTON1_3, INPUT_PULLUP);
+  pinMode(BUTTON1_0, INPUT_PULLUP);
+  pinMode(BUTTON1_1, INPUT_PULLUP);
+  pinMode(BUTTON1_2, INPUT_PULLUP);
+  pinMode(BUTTON1_3, INPUT_PULLUP);
 
-	pinMode(TOGGLESW, INPUT_PULLUP);
+  pinMode(TOGGLESW, INPUT_PULLUP);
 
   pinMode(BUSY_PIN, INPUT);
 
-	pinMode(LED_ONBOARD, OUTPUT);
-	pinMode(LED1, OUTPUT);
-	pinMode(LED2, OUTPUT);
+  /* Initialise outputs */
+  pinMode(LED_ONBOARD, OUTPUT);
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
 
-	// FALLING and RISING also work as CHANGE...
-	attachInterrupt(digitalPinToInterrupt(BUTTON0_0), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON0_1), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON0_2), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON0_3), button_pressed, CHANGE);
+  /* Define interrupts on inputs */
+  // FALLING and RISING also work as CHANGE...
+  attachInterrupt(digitalPinToInterrupt(BUTTON0_0), button_0_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON0_1), button_0_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON0_2), button_0_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON0_3), button_0_pressed, CHANGE);
 
-	attachInterrupt(digitalPinToInterrupt(BUTTON1_0), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON1_1), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON1_2), button_pressed, CHANGE);
-	attachInterrupt(digitalPinToInterrupt(BUTTON1_3), button_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_0), button_1_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_1), button_1_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_2), button_1_pressed, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_3), button_1_pressed, CHANGE);
 
-	//attachInterrupt(digitalPinToInterrupt(TOGGLESW), toggle_switch_toggled, CHANGE);
-	// attach interrupts => wake from sleep to run mainloop
-	// OR run timer, that triggers main loop execution periodically?
+  /*attachInterrupt(digitalPinToInterrupt(TOGGLESW), switch_toggled, CHANGE);
+  attach interrupts => wake from sleep to run mainloop */
+  esp_sleep_enable_timer_wakeup(10000); // microseconds
 
-	/* Use 1st timer of 4 */
-	/* 1 tick take 1/(80MHZ/80000) = 1ms so we set divider 80 and count up */
-	//timer = timerBegin(0, 80000, true);
-
-	/* attachinterrupt */
-	//timerAttachInterrupt(timer, &timerCallback, true);
-	//timerAlarmWrite(timer, 1000, true);
-	//timerAlarmEnable(timer);
-
-  esp_sleep_enable_timer_wakeup(10000);// us
-
-	/* enable sleep wakeup from external pins */
-	gpio_wakeup_enable((gpio_num_t)BUTTON0_0, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON0_1, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON0_2, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON0_3, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON1_0, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON1_1, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON1_2, GPIO_INTR_LOW_LEVEL);
-	gpio_wakeup_enable((gpio_num_t)BUTTON1_3, GPIO_INTR_LOW_LEVEL);
+  /* Enable sleep wakeup from input pins */
+  gpio_wakeup_enable((gpio_num_t)BUTTON0_0, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON0_1, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON0_2, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON0_3, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON1_0, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON1_1, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON1_2, GPIO_INTR_LOW_LEVEL);
+  gpio_wakeup_enable((gpio_num_t)BUTTON1_3, GPIO_INTR_LOW_LEVEL);
   gpio_wakeup_enable((gpio_num_t)TOGGLESW, GPIO_INTR_LOW_LEVEL);
-	esp_sleep_enable_gpio_wakeup();
+  esp_sleep_enable_gpio_wakeup();
 
-	digitalWrite(LED_ONBOARD, led_state);
-  prev_sw_state = digitalRead(TOGGLESW);
-  switches.mode_switch = prev_sw_state;
+  setLedState(LED_ONBOARD, led_state);
+  switches.mode_switch = digitalRead(TOGGLESW);
 
-  //DFPlayer Mini
+  /* DFPlayer Mini (MP3 player) initialisation */
   mySoftwareSerial.begin(9600, SERIAL_8N1, 16, 17);
   myDFPlayer.begin(mySoftwareSerial);
   myDFPlayer.volume(30);
-  //myDFPlayer.play(1);
 }
 
-void onConnectionEstablished() {
-    sprintf(buff, "%d%d%d", 0, 0, switches.mode_switch);
-    client.publish("warmste/week/theo", buff);
-    Serial.print("MQTT connected.\n");
+/* Callback when successfully connected to MQTT broker */
+void onConnectionEstablished()
+{
+  sprintf(send_buff, "%d%d%d", 0, 0, switches.mode_switch);
+  mqtt_client.publish("warmste/week/theo", send_buff);
+
+  /* Say "connected" */
+  /*if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+  {
+    #ifdef DEBUG
+    Serial.print("Say CONNECTED.\n");
+    #endif
+    
+    //myDFPlayer.play(3);   
+  }*/
+
+  #ifdef DEBUG
+  Serial.print("MQTT connected.\n");
+  #endif
 }
 
+/* Perform task in local mode - Saying Yes/No */
+void processLocalState()
+{
+  if(buttons.button0_state == 1 && buttons.button0_initial_press == 1)
+  {
+    buttons.button0_initial_press = 0;
+
+    /* Say "no" */
+    if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+    {
+      #ifdef DEBUG
+      Serial.print("Say NO.\n");
+      #endif
+
+      myDFPlayer.play(1);         //Track 1 - NO   
+    }
+  }
+  
+  if(buttons.button1_state == 1 && buttons.button1_initial_press == 1)
+  {
+    buttons.button1_initial_press = 0;
+
+    /* Say "yes" */
+    if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+    {
+      #ifdef DEBUG
+      Serial.print("Say YES.\n");
+      #endif
+
+      myDFPlayer.play(2);         //Track 2 - YES
+    }
+  }
+}
+
+/* Perform task in remote mode - Communication with MQTT server */
+void processRemoteState()
+{
+  if(mqtt_client.isConnected())
+  {
+    if(buttons.button0_state == 1 && buttons.button0_initial_press == 1)
+    {
+      buttons.button0_initial_press = 0;
+      sprintf(send_buff, "%d%d%d", 1, 0, switches.mode_switch);
+      mqtt_client.publish("warmste/week/theo", send_buff);
+
+      #ifdef DEBUG
+      Serial.print("Message sent.\n");
+      #endif
+    }
+    
+    if(buttons.button1_state == 1 && buttons.button1_initial_press == 1)
+    {
+      buttons.button1_initial_press = 0;
+      sprintf(send_buff, "%d%d%d", 0, 1, switches.mode_switch);
+      mqtt_client.publish("warmste/week/theo", send_buff);
+
+      #ifdef DEBUG
+      Serial.print("Message sent.\n");
+      #endif
+    }
+  }
+}
+
+/* Read input state of Button 0 */
+uint8_t readStateButton0()
+{
+  return !digitalRead(BUTTON0_0) || !digitalRead(BUTTON0_1) || !digitalRead(BUTTON0_2) || !digitalRead(BUTTON0_3);
+}
+
+/* Read input state of Button 1 */
+uint8_t readStateButton1()
+{
+  return !digitalRead(BUTTON1_0) || !digitalRead(BUTTON1_1) || !digitalRead(BUTTON1_2) || !digitalRead(BUTTON1_3);
+}
+
+/* Program loop */
 void loop()
 {
-	client.loop(); // for mqtt
-
-    // check if buttons are low on every loop.
-    if (digitalRead(BUTTON0_0) && digitalRead(BUTTON0_1) && digitalRead(BUTTON0_2) && digitalRead(BUTTON0_3))
+  /* Handle button events */
+  if(button_0_state_changed)
+  {
+    button_0_state_changed = 0;
+  
+    if(readStateButton0())
+    {
+      buttons.button0_initial_press = !buttons.button0_state;
+      buttons.button0_state = 1;
+      #ifdef DEBUG
+      toggleLedState(LED_ONBOARD, &led_state);
+      #endif
+    }
+    else
     {
       buttons.button0_state = 0;
-      digitalWrite(LED_ONBOARD, !led_state);
-      led_state = !led_state;
+      #ifdef DEBUG
+      toggleLedState(LED_ONBOARD, &led_state);
+      #endif
     }
-    if (digitalRead(BUTTON1_0) && digitalRead(BUTTON1_1) && digitalRead(BUTTON1_2) && digitalRead(BUTTON1_3))
+  }
+
+  if(button_1_state_changed)
+  {
+    button_1_state_changed = 0;
+      
+    if(readStateButton1())
+    {
+      buttons.button1_initial_press = !buttons.button1_state;
+      buttons.button1_state = 1;
+      #ifdef DEBUG
+      toggleLedState(LED_ONBOARD, &led_state);
+      #endif
+    }
+    else
     {
       buttons.button1_state = 0;
-      digitalWrite(LED_ONBOARD, !led_state);
-      led_state = !led_state;
+      #ifdef DEBUG
+      toggleLedState(LED_ONBOARD, &led_state);
+      #endif
     }
-		// button input handling when pressed
-		if (button_state_changed)
-		{
-			button_state_changed = 0;
+  }
 
-			if (!digitalRead(BUTTON0_0) || !digitalRead(BUTTON0_1) || !digitalRead(BUTTON0_2) || !digitalRead(BUTTON0_3))
-			{
-        buttons.button0_initial_press = buttons.button0_state == 0 ? 1 : 0;
-				buttons.button0_state = 1;
-				digitalWrite(LED_ONBOARD, !led_state);
-				led_state = !led_state;
-			}
+  /* Reading switch state */
+  bool sw_state = digitalRead(TOGGLESW);
+  if(sw_state != switches.mode_switch)
+  {
+    switches.mode_switch = sw_state;
 
-			if (!digitalRead(BUTTON1_0) || !digitalRead(BUTTON1_1) || !digitalRead(BUTTON1_2) || !digitalRead(BUTTON1_3))
-			{
-        buttons.button1_initial_press = buttons.button1_state == 0 ? 1 : 0;
-				buttons.button1_state = 1;
-				digitalWrite(LED_ONBOARD, !led_state);
-				led_state = !led_state;
-			}
-		}
-
-		// main statemachine would go here.
-    bool sw_state = digitalRead(TOGGLESW);
-    if(sw_state != prev_sw_state) {
-        switches.mode_switch = sw_state;
-        sprintf(buff, "%d%d%d", 0, 0, switches.mode_switch);
-        client.publish("warmste/week/theo", buff);
-        Serial.print("State switch.\n");
+    if(mqtt_client.isConnected())
+    {
+      sprintf(send_buff, "%d%d%d", 0, 0, switches.mode_switch);
+      mqtt_client.publish("warmste/week/theo", send_buff);
     }
-    prev_sw_state = sw_state;
-		// first state, local yes/no
-		if (sw_state)
-		{
-			if (true)//(client.isMqttConnected())
-			{
-				if (buttons.button0_state == 1 && buttons.button0_initial_press == 1)
-				{
-          buttons.button0_initial_press = 0;
-					//client.publish("warmste/week/theo/buttons/0", "1");
-          //sprintf(buff, "%d%d%d", 1, 0, switches.mode_switch);
-          //client.publish("warmste/week/theo", buff);
-					//Serial.print("Message sent.\n");
-          // Play "yes"
-          if (myDFPlayer.available()) {
-              myDFPlayer.play(1);   
-          }
-				}
-				if (buttons.button1_state == 1 && buttons.button1_initial_press == 1)
-				{
-          buttons.button1_initial_press = 0;
-					//client.publish("warmste/week/theo/buttons/1", "1");
-          //sprintf(buff, "%d%d%d", 0, 1, switches.mode_switch);
-          //client.publish("warmste/week/theo", buff);
-					//Serial.print("Message sent.\n");
-          // Play "no"
-          if (myDFPlayer.available()) {
-              myDFPlayer.play(2);   
-          }
-				}
-			}
-     //while(!myDFPlayer.available()){}
-     while(digitalRead(BUSY_PIN) == 0){}
-			esp_light_sleep_start();
-		} else {
-			if (client.isMqttConnected())
-			{
-				if (buttons.button0_state == 1 && buttons.button0_initial_press == 1)
-				{
-        buttons.button0_initial_press = 0;
-					//client.publish("warmste/week/theo/buttons/0", "1");
-          sprintf(buff, "%d%d%d", 1, 0, switches.mode_switch);
-          client.publish("warmste/week/theo", buff);
-					Serial.print("Message sent.\n");
-				}
-				if (buttons.button1_state == 1 && buttons.button1_initial_press == 1)
-				{
-        buttons.button1_initial_press = 0;
-					//client.publish("warmste/week/theo/buttons/1", "1");
-          sprintf(buff, "%d%d%d", 0, 1, switches.mode_switch);
-          client.publish("warmste/week/theo", buff);
-					Serial.print("Message sent.\n");
-				}
-			}
-		}
+    
+    #ifdef DEBUG
+    Serial.print("State switch.\n");
+    #endif
+  }
+	
+  /* Select mode with switch */
+  if(sw_state)
+  {
+    /* Local state - say Yes/No */
+    processLocalState();
+
+    /* Enter sleep (low power mode) */
+    #ifndef DEBUG
+    //esp_light_sleep_start();
+    #endif
+  }
+  else
+  {  
+    /* Remote state - Communicating with MQTT server */
+    processRemoteState();
+
+    /* MQTT communication handle */
+    mqtt_client.loop();
+  }
 }
