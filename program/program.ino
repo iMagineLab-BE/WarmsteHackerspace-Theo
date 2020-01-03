@@ -3,7 +3,10 @@
 #include "DFRobotDFPlayerMini.h"
 
 /* Turn on debug mode - turn off to lower power consumption */
-#define DEBUG
+//#define DEBUG
+
+/* Turn on sleep mode - turn on to lower power consumption */
+#define SLEEP
 
 /* DFPlayer Mini (MP3 player) */
 HardwareSerial mySoftwareSerial(1);
@@ -44,6 +47,7 @@ EspMQTTClient mqtt_client(
 /* Variables declaration */
 static volatile uint8_t button_0_state_changed = 0;
 static volatile uint8_t button_1_state_changed = 0;
+static volatile uint8_t switch_state_changed = 0;
 static uint8_t led_state = 0;
 char send_buff[3];
 struct
@@ -78,13 +82,7 @@ void button_1_pressed()
 /* Interrupt callback - Switch */
 void switch_toggled()
 {
-  switches.mode_switch = digitalRead(TOGGLESW);
-  sprintf(send_buff, "%d%d%d", 0, 0, switches.mode_switch);
-  mqtt_client.publish("warmste/week/theo", send_buff);
-	
-  #ifdef DEBUG
-  Serial.print("State switch.\n");
-  #endif
+  switch_state_changed = 1;
 }
 
 void setLedState(uint8_t led, uint8_t state)
@@ -96,6 +94,11 @@ void toggleLedState(uint8_t led, uint8_t* state)
 {
   *state = !*state;
   digitalWrite(led, *state);
+}
+
+bool dfplayerReady()
+{
+  return myDFPlayer.waitAvailable(10) && digitalRead(BUSY_PIN);
 }
 
 void setup()
@@ -137,9 +140,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(BUTTON1_2), button_1_pressed, CHANGE);
   attachInterrupt(digitalPinToInterrupt(BUTTON1_3), button_1_pressed, CHANGE);
 
-  /*attachInterrupt(digitalPinToInterrupt(TOGGLESW), switch_toggled, CHANGE);
-  attach interrupts => wake from sleep to run mainloop */
-  esp_sleep_enable_timer_wakeup(10000); // microseconds
+  //attachInterrupt(digitalPinToInterrupt(TOGGLESW), switch_toggled, CHANGE);
 
   /* Enable sleep wakeup from input pins */
   gpio_wakeup_enable((gpio_num_t)BUTTON0_0, GPIO_INTR_LOW_LEVEL);
@@ -159,6 +160,7 @@ void setup()
   /* DFPlayer Mini (MP3 player) initialisation */
   mySoftwareSerial.begin(9600, SERIAL_8N1, 16, 17);
   myDFPlayer.begin(mySoftwareSerial);
+  myDFPlayer.reset();
   myDFPlayer.volume(30);
 }
 
@@ -169,14 +171,14 @@ void onConnectionEstablished()
   mqtt_client.publish("warmste/week/theo", send_buff);
 
   /* Say "connected" */
-  /*if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+  if(dfplayerReady())
   {
     #ifdef DEBUG
     Serial.print("Say CONNECTED.\n");
     #endif
     
-    //myDFPlayer.play(3);   
-  }*/
+    myDFPlayer.play(3);   
+  }
 
   #ifdef DEBUG
   Serial.print("MQTT connected.\n");
@@ -191,7 +193,7 @@ void processLocalState()
     buttons.button0_initial_press = 0;
 
     /* Say "no" */
-    if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+    if(dfplayerReady())
     {
       #ifdef DEBUG
       Serial.print("Say NO.\n");
@@ -206,7 +208,7 @@ void processLocalState()
     buttons.button1_initial_press = 0;
 
     /* Say "yes" */
-    if(myDFPlayer.available() && digitalRead(BUSY_PIN))
+    if(dfplayerReady())
     {
       #ifdef DEBUG
       Serial.print("Say YES.\n");
@@ -247,15 +249,29 @@ void processRemoteState()
 }
 
 /* Read input state of Button 0 */
-uint8_t readStateButton0()
+bool readStateButton0()
 {
   return !digitalRead(BUTTON0_0) || !digitalRead(BUTTON0_1) || !digitalRead(BUTTON0_2) || !digitalRead(BUTTON0_3);
 }
 
 /* Read input state of Button 1 */
-uint8_t readStateButton1()
+bool readStateButton1()
 {
   return !digitalRead(BUTTON1_0) || !digitalRead(BUTTON1_1) || !digitalRead(BUTTON1_2) || !digitalRead(BUTTON1_3);
+}
+
+/* Request sleep mode */
+void enterSleep()
+{
+  if(!buttons.button0_state && !buttons.button1_state && dfplayerReady())
+  {
+    /* Enter sleep mode */
+    #ifdef DEBUG
+    Serial.print("Enter sleep mode.\n");
+    #endif
+
+    esp_light_sleep_start();
+  }
 }
 
 /* Program loop */
@@ -304,8 +320,8 @@ void loop()
     }
   }
 
-  /* Reading switch state */
-  bool sw_state = digitalRead(TOGGLESW);
+  /* Reading switch state */  
+  uint8_t sw_state = digitalRead(TOGGLESW);
   if(sw_state != switches.mode_switch)
   {
     switches.mode_switch = sw_state;
@@ -322,14 +338,14 @@ void loop()
   }
 	
   /* Select mode with switch */
-  if(sw_state)
+  if(switches.mode_switch)
   {
     /* Local state - say Yes/No */
     processLocalState();
 
     /* Enter sleep (low power mode) */
-    #ifndef DEBUG
-    //esp_light_sleep_start();
+    #ifdef SLEEP
+    enterSleep();
     #endif
   }
   else
