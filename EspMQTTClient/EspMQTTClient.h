@@ -27,7 +27,7 @@
 
 #define MAX_TOPIC_SUBSCRIPTION_LIST_SIZE 10
 #define MAX_DELAYED_EXECUTION_LIST_SIZE 10
-#define CONNECTION_RETRY_DELAY 10 * 1000
+#define CONNECTION_RETRY_DELAY 1 * 1000
 
 void onConnectionEstablished(); // MUST be implemented in your sketch. Called once everythings is connected (Wifi, mqtt).
 
@@ -58,6 +58,8 @@ private:
   char* mMqttLastWillTopic;
   char* mMqttLastWillMessage;
   bool mMqttLastWillRetain;
+  
+  bool mResetConnection;
 
   PubSubClient mMqttClient;
 
@@ -156,6 +158,8 @@ public:
   void enableHTTPWebUpdater(const char* address = "/"); // Will set user and password equal to mMqttUsername and mMqttPassword
   void enableMQTTPersistence(); // Tell the broker to establish a persistent connection. Disabled by default. Must be called before the first loop() execution
   void enableLastWillMessage(const char* topic, const char* message, const bool retain = false); // Must be set before the first loop() call.
+
+  void resetConnection();
 
   // Main loop, to call at each sketch loop()
   void loop();

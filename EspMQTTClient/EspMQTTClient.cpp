@@ -125,6 +125,7 @@ EspMQTTClient::EspMQTTClient(
   mShowLegacyConstructorWarning = false;
   mDelayedExecutionListSize = 0;
   mConnectionEstablishedCount = 0;
+  mResetConnection = false;
 }
 
 EspMQTTClient::~EspMQTTClient()
@@ -179,12 +180,22 @@ void EspMQTTClient::enableLastWillMessage(const char* topic, const char* message
 
 
 // =============== Public functions =================
+void EspMQTTClient::resetConnection()
+{
+  mResetConnection = true;
+}
 
 void EspMQTTClient::loop()
 {
   unsigned long currentMillis = millis();
+  
+  if (mResetConnection)
+  {
+	mWifiConnected = false;
+	mMqttConnected = false;
+  }
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (WiFi.status() == WL_CONNECTED && !mResetConnection)
   {
     // If we just being connected to wifi
     if (!mWifiConnected)
@@ -252,8 +263,13 @@ void EspMQTTClient::loop()
     }
     
     // We retry to connect to the wifi if we handle it and there was no attempt since the last connection lost
-    if (mWifiSsid != NULL && (mLastWifiConnectionAttemptMillis == 0 || mLastWifiConnectionSuccessMillis > mLastWifiConnectionAttemptMillis))
-      connectToWifi();
+    if (mWifiSsid != NULL && (mLastWifiConnectionAttemptMillis == 0 || mLastWifiConnectionSuccessMillis >= mLastWifiConnectionAttemptMillis || mResetConnection))
+	  connectToWifi();
+  }
+  
+  if (mResetConnection)
+  {
+	mResetConnection = false;
   }
   
   // Delayed execution handling
@@ -402,10 +418,6 @@ void EspMQTTClient::connectToWifi()
   #else
     WiFi.hostname(mMqttClientName);
   #endif
-  IPAddress ip(192, 168, 1, 5); 
-  IPAddress gateway(192, 168, 1, 254);
-  IPAddress subnet(255, 255, 255, 0);
-  WiFi.config(ip, gateway, subnet);
   WiFi.begin(mWifiSsid, mWifiPassword);
 
   if (mEnableSerialLogs)

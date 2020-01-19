@@ -326,6 +326,8 @@ void loop()
   {
     switches.mode_switch = sw_state;
 
+    mqtt_client.resetConnection();
+    
     if(mqtt_client.isConnected())
     {
       sprintf(send_buff, "%d%d%d", 0, 0, switches.mode_switch);
